@@ -1,0 +1,47 @@
+name: Deploy Road to Rome Demo
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download current Godot web build
+        run: |
+          set -euo pipefail
+          mkdir -p tmp site
+          curl -fL --retry 4 -o artifact.zip 'https://sdmntpritalynorth.oaiusercontent.com/files/00000000-afa4-8246-b86d-24f4cfe56921/raw?se=2026-10-03T12%3A05%3A57Z&sp=r&sv=2026-02-06&sr=b&scid=84c09a2e-7b3c-5d4c-8396-00b59653feb9&skoid=76024c37-11e2-4c92-aa07-7e519fbe2d0f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-03T04%3A47%3A53Z&ske=2026-10-04T04%3A47%3A53Z&sks=b&skv=2026-02-06&sig=8%2BrFs3Y8gpd0lxZCMAeVkG9W8/0ixhe7/LymW0r7gyY%3D'
+          unzip -q artifact.zip -d tmp
+          unzip -q tmp/RoadToRome_POC_Web.zip -d site
+          test -s site/index.html
+          test -s site/index.wasm
+          test -s site/index.pck
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
