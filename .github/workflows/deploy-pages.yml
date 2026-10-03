@@ -16,29 +16,62 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Download current Godot web build
-        run: |
-          set -euo pipefail
-          mkdir -p tmp site
-          curl -fL --retry 4 -o artifact.zip 'https://sdmntpritalynorth.oaiusercontent.com/files/00000000-afa4-8246-b86d-24f4cfe56921/raw?se=2026-10-03T12%3A05%3A57Z&sp=r&sv=2026-02-06&sr=b&scid=84c09a2e-7b3c-5d4c-8396-00b59653feb9&skoid=76024c37-11e2-4c92-aa07-7e519fbe2d0f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-03T04%3A47%3A53Z&ske=2026-10-04T04%3A47%3A53Z&sks=b&skv=2026-02-06&sig=8%2BrFs3Y8gpd0lxZCMAeVkG9W8/0ixhe7/LymW0r7gyY%3D'
-          unzip -q artifact.zip -d tmp
-          unzip -q tmp/RoadToRome_POC_Web.zip -d site
-          touch site/.nojekyll
-          test -s site/index.html
-          test -s site/index.wasm
-          test -s site/index.pck
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Publish compiled web build to gh-pages branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Rebuild validated index.pck from compiled patch
         run: |
           set -euo pipefail
-          cd site
-          git init
+          python - <<'PY'
+          from pathlib import Path
+          import base64, zlib, struct, subprocess, hashlib
+
+          subprocess.run(['git', 'show', 'origin/gh-pages:index.pck'], check=True, stdout=open('/tmp/index-old.pck', 'wb'))
+          old = Path('/tmp/index-old.pck').read_bytes()
+          patch = zlib.decompress(base64.b64decode(Path('payload/index_pck_patch.b64').read_text().strip()))
+          if patch[:2] != b'P1':
+              raise SystemExit('Unexpected patch format')
+
+          pos = 2
+          out = bytearray()
+          while True:
+              op = patch[pos:pos+1]
+              pos += 1
+              if op == b'E':
+                  break
+              if op == b'C':
+                  start, length = struct.unpack_from('<II', patch, pos)
+                  pos += 8
+                  out += old[start:start+length]
+              elif op == b'L':
+                  (length,) = struct.unpack_from('<I', patch, pos)
+                  pos += 4
+                  out += patch[pos:pos+length]
+                  pos += length
+              else:
+                  raise SystemExit(f'Unknown patch opcode: {op!r}')
+
+          expected = '610ed386e20510c0d588d369c2cac6a864319c35cc05ee99ac4bc1b14c79bfd5'
+          actual = hashlib.sha256(out).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'Patched PCK hash mismatch: {actual}')
+          Path('/tmp/index-new.pck').write_bytes(out)
+          print('Validated index.pck:', len(out), actual)
+          PY
+
+      - name: Publish fixed package to gh-pages
+        run: |
+          set -euo pipefail
+          git checkout gh-pages
+          cp /tmp/index-new.pck index.pck
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b gh-pages
-          git add -A
-          git commit -m "Publish Road to Rome web demo"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin gh-pages
+          git add index.pck
+          if git diff --cached --quiet; then
+            echo "No compiled package change to publish."
+          else
+            git commit -m "Publish validated Godot package"
+            git push origin gh-pages
+          fi
