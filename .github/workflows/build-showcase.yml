@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'RoadToRome_Showcase_Bundle.tar.gz'
+      - 'RoadToRome_Showcase_Bundle_v2.tar.gz.b64'
       - '.github/workflows/build-showcase.yml'
   workflow_dispatch:
 
@@ -27,15 +28,20 @@ jobs:
       - name: Checkout demo repository
         uses: actions/checkout@v4
 
-      - name: Verify showcase bundle exists
+      - name: Prepare showcase bundle
         run: |
           set -euo pipefail
+          if [ -s RoadToRome_Showcase_Bundle_v2.tar.gz.b64 ]; then
+            echo 'Using stabilized v2 showcase bundle.'
+            base64 -d RoadToRome_Showcase_Bundle_v2.tar.gz.b64 > RoadToRome_Showcase_Bundle.tar.gz
+          fi
           test -s RoadToRome_Showcase_Bundle.tar.gz
           mkdir -p game site
           tar -xzf RoadToRome_Showcase_Bundle.tar.gz -C game
           test -s game/project.godot
           test -s game/scripts/PrettyMain.gd
           test -s game/assets/pretty/hof_showcase.jpg
+          test -s game/assets/pretty/items/turnip_world.webp
 
       - name: Download Godot
         run: |
@@ -124,6 +130,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout -b gh-pages
           git add -A
-          git commit -m 'Publish Road to Rome pretty showcase'
+          git commit -m 'Publish Road to Rome stabilized showcase'
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin gh-pages
