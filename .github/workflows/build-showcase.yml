@@ -1,0 +1,129 @@
+name: Build Pretty Showcase
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'RoadToRome_Showcase_Bundle.tar.gz'
+      - '.github/workflows/build-showcase.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: '4.7.2'
+  GODOT_STATUS: 'stable'
+
+concurrency:
+  group: road-to-rome-showcase
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout demo repository
+        uses: actions/checkout@v4
+
+      - name: Verify showcase bundle exists
+        run: |
+          set -euo pipefail
+          test -s RoadToRome_Showcase_Bundle.tar.gz
+          mkdir -p game site
+          tar -xzf RoadToRome_Showcase_Bundle.tar.gz -C game
+          test -s game/project.godot
+          test -s game/scripts/PrettyMain.gd
+          test -s game/assets/pretty/hof_showcase.jpg
+
+      - name: Download Godot
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/godot"
+          curl -fL --retry 4 -o "$HOME/godot/godot.zip" "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_STATUS}/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64.zip"
+          unzip -q "$HOME/godot/godot.zip" -d "$HOME/godot"
+          chmod +x "$HOME/godot/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64"
+
+      - name: Install Web export templates
+        run: |
+          set -euo pipefail
+          DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}"
+          mkdir -p "$DIR" /tmp/templates
+          curl -fL --retry 4 -o /tmp/templates.tpz "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-${GODOT_STATUS}/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_export_templates.tpz"
+          unzip -q /tmp/templates.tpz -d /tmp/templates
+          cp -R /tmp/templates/templates/. "$DIR/"
+
+      - name: Add Web export preset
+        run: |
+          cat > game/export_presets.cfg <<'EOF'
+          [preset.0]
+          name="Web"
+          platform="Web"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path=""
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+          script_export_mode=2
+
+          [preset.0.options]
+          custom_template/debug=""
+          custom_template/release=""
+          variant/extensions_support=false
+          variant/thread_support=false
+          vram_texture_compression/for_desktop=true
+          vram_texture_compression/for_mobile=false
+          html/export_icon=true
+          html/custom_html_shell=""
+          html/head_include=""
+          html/canvas_resize_policy=2
+          html/focus_canvas_on_start=true
+          html/experimental_virtual_keyboard=false
+          progressive_web_app/enabled=false
+          EOF
+
+      - name: Import and validate Godot project
+        run: |
+          set -o pipefail
+          GODOT="$HOME/godot/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64"
+          "$GODOT" --headless --path game --editor --quit 2>&1 | tee godot-import.log
+          if grep -Eq 'SCRIPT ERROR|Parse Error|Failed to load script|ERROR:.*PrettyMain' godot-import.log; then
+            echo 'Godot validation failed.'
+            exit 1
+          fi
+
+      - name: Export Web showcase
+        run: |
+          set -o pipefail
+          GODOT="$HOME/godot/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64"
+          "$GODOT" --headless --path game --export-release Web "$GITHUB_WORKSPACE/site/index.html" 2>&1 | tee godot-export.log
+          if grep -Eq 'SCRIPT ERROR|Parse Error|Failed to load script' godot-export.log; then
+            echo 'Godot export contained script errors.'
+            exit 1
+          fi
+          test -s site/index.html
+          test -s site/index.wasm
+          test -s site/index.pck
+          touch site/.nojekyll
+
+      - name: Publish showcase to GitHub Pages branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd site
+          git init
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b gh-pages
+          git add -A
+          git commit -m 'Publish Road to Rome pretty showcase'
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin gh-pages
