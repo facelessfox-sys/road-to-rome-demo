@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'RoadToRome_Showcase_Bundle.tar.gz'
-      - 'RoadToRome_Showcase_Bundle_v2.tar.gz.b64'
+      - 'patches/**'
       - '.github/workflows/build-showcase.yml'
   workflow_dispatch:
 
@@ -28,20 +28,25 @@ jobs:
       - name: Checkout demo repository
         uses: actions/checkout@v4
 
-      - name: Prepare showcase bundle
+      - name: Extract known-good showcase bundle
         run: |
           set -euo pipefail
-          if [ -s RoadToRome_Showcase_Bundle_v2.tar.gz.b64 ]; then
-            echo 'Using stabilized v2 showcase bundle.'
-            base64 -d RoadToRome_Showcase_Bundle_v2.tar.gz.b64 > RoadToRome_Showcase_Bundle.tar.gz
-          fi
           test -s RoadToRome_Showcase_Bundle.tar.gz
           mkdir -p game site
           tar -xzf RoadToRome_Showcase_Bundle.tar.gz -C game
           test -s game/project.godot
           test -s game/scripts/PrettyMain.gd
           test -s game/assets/pretty/hof_showcase.jpg
-          test -s game/assets/pretty/items/turnip_world.webp
+          test -s game/assets/pretty/items/turnip_icon.webp
+
+      - name: Apply emergency visual hotfix
+        run: |
+          set -euo pipefail
+          python patches/apply_hotfix.py
+          grep -q 'func _setup_items' game/scripts/PrettyMain.gd
+          ! grep -q 'mars_head\.' game/scripts/PrettyMain.gd
+          ! grep -q 'hen_brown\.' game/scripts/PrettyMain.gd
+          ! grep -q 'hen_white\.' game/scripts/PrettyMain.gd
 
       - name: Download Godot
         run: |
@@ -130,6 +135,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout -b gh-pages
           git add -A
-          git commit -m 'Publish Road to Rome stabilized showcase'
+          git commit -m 'Publish Road to Rome emergency hotfix'
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force origin gh-pages
