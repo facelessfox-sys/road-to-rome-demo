@@ -1,0 +1,54 @@
+name: Deploy Tested PCK Patch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'payload/tested_index_pck.b64'
+      - '.github/workflows/deploy-pck-patch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: road-to-rome-pages-pck
+  cancel-in-progress: true
+
+jobs:
+  deploy-pck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main payload
+        uses: actions/checkout@v4
+        with:
+          path: main-src
+
+      - name: Checkout current Pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Replace game package
+        run: |
+          set -euo pipefail
+          test -s main-src/payload/tested_index_pck.b64
+          base64 -d main-src/payload/tested_index_pck.b64 > site/index.pck
+          test -s site/index.pck
+          printf '%s\n' '${{ github.sha }}' > site/build.txt
+          touch site/.nojekyll
+
+      - name: Publish patched Pages build
+        working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.pck build.txt .nojekyll
+          git commit -m 'Deploy tested architecture rebuild' || exit 0
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin gh-pages
